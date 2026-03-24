@@ -1,97 +1,93 @@
-import random
-from typing import List, Optional, Dict
+import pygame
+import time
+from typing import Optional, List
 
 class MusicPlayer:
     def __init__(self):
-        self.current_track: Optional[str] = None
-        self.queue: List[Dict] = []
-        self.mood_categories = {
-            'happy': ['pop', 'dance', 'upbeat'],
-            'relaxed': ['ambient', 'classical', 'jazz'],
-            'energetic': ['rock', 'electronic', 'hip-hop'],
-            'melancholic': ['blues', 'indie', 'acoustic']
-        }
-        self.is_playing: bool = False
-        self.volume: float = 1.0
-        self.repeat_mode: str = 'off'  # 'off', 'one', 'all'
+        pygame.mixer.init()
+        self.current_track: Optional[pygame.mixer.Sound] = None
+        self.next_track: Optional[pygame.mixer.Sound] = None
+        self.volume = 1.0
+        self.crossfade_duration = 3.0  # seconds
+        self.playlist: List[str] = []
+        self.current_index = 0
+        self.is_playing = False
 
-    def add_to_queue(self, track: Dict) -> None:
-        """Add a track to the play queue"""
-        self.queue.append(track)
+    def load_track(self, filepath: str) -> None:
+        """Load an audio track from the given filepath."""
+        try:
+            self.current_track = pygame.mixer.Sound(filepath)
+            self.current_track.set_volume(self.volume)
+        except pygame.error as e:
+            raise Exception(f'Error loading track: {e}')
 
-    def add_mood_based_tracks(self, mood: str, tracks: List[Dict]) -> None:
-        """Add tracks that match the specified mood to queue"""
-        if mood not in self.mood_categories:
-            raise ValueError(f'Invalid mood: {mood}')
-            
-        matching_tracks = [
-            track for track in tracks
-            if any(genre in track.get('genres', []) 
-                  for genre in self.mood_categories[mood])
-        ]
-        self.queue.extend(matching_tracks)
-
-    def shuffle_queue(self) -> None:
-        """Randomly shuffle the current queue"""
-        random.shuffle(self.queue)
-
-    def clear_queue(self) -> None:
-        """Clear all tracks from queue"""
-        self.queue = []
-
-    def skip_track(self) -> Optional[Dict]:
-        """Skip to next track in queue"""
-        if not self.queue:
-            self.current_track = None
-            self.is_playing = False
-            return None
-            
-        if self.repeat_mode == 'one' and self.current_track:
-            return self.current_track
-            
-        next_track = self.queue.pop(0)
-        if self.repeat_mode == 'all':
-            self.queue.append(next_track)
-            
-        self.current_track = next_track
-        return next_track
-
-    def previous_track(self) -> Optional[Dict]:
-        """Return to previous track"""
-        if not self.queue or not self.current_track:
-            return None
-            
-        self.queue.insert(0, self.current_track)
-        return self.queue[0]
-
-    def set_volume(self, volume: float) -> None:
-        """Set player volume (0.0 to 1.0)"""
-        if not 0 <= volume <= 1:
-            raise ValueError('Volume must be between 0 and 1')
-        self.volume = volume
-
-    def set_repeat_mode(self, mode: str) -> None:
-        """Set repeat mode (off/one/all)"""
-        if mode not in ['off', 'one', 'all']:
-            raise ValueError('Invalid repeat mode')
-        self.repeat_mode = mode
-
-    def get_queue_info(self) -> Dict:
-        """Get current queue status and info"""
-        return {
-            'current_track': self.current_track,
-            'queue_length': len(self.queue),
-            'is_playing': self.is_playing,
-            'volume': self.volume,
-            'repeat_mode': self.repeat_mode
-        }
+    def add_to_playlist(self, filepath: str) -> None:
+        """Add a track to the playlist."""
+        self.playlist.append(filepath)
 
     def play(self) -> None:
-        """Start or resume playback"""
-        if self.queue and not self.current_track:
-            self.current_track = self.queue.pop(0)
-        self.is_playing = True
+        """Start playing the current track."""
+        if self.current_track:
+            self.current_track.play()
+            self.is_playing = True
 
-    def pause(self) -> None:
-        """Pause playback"""
-        self.is_playing = False
+    def stop(self) -> None:
+        """Stop the current track."""
+        if self.current_track:
+            self.current_track.stop()
+            self.is_playing = False
+
+    def set_volume(self, volume: float) -> None:
+        """Set volume level (0.0 to 1.0)."""
+        self.volume = max(0.0, min(1.0, volume))
+        if self.current_track:
+            self.current_track.set_volume(self.volume)
+
+    def crossfade_to_next(self) -> None:
+        """Smoothly transition to the next track with crossfade."""
+        if not self.playlist or self.current_index >= len(self.playlist) - 1:
+            return
+
+        # Load next track
+        next_index = (self.current_index + 1) % len(self.playlist)
+        self.next_track = pygame.mixer.Sound(self.playlist[next_index])
+        self.next_track.set_volume(0.0)
+        self.next_track.play()
+
+        # Perform crossfade
+        steps = 50
+        sleep_time = self.crossfade_duration / steps
+        
+        for i in range(steps):
+            old_vol = self.volume * (1 - (i / steps))
+            new_vol = self.volume * (i / steps)
+            
+            if self.current_track:
+                self.current_track.set_volume(old_vol)
+            if self.next_track:
+                self.next_track.set_volume(new_vol)
+                
+            time.sleep(sleep_time)
+
+        # Stop old track and update current
+        if self.current_track:
+            self.current_track.stop()
+        self.current_track = self.next_track
+        self.next_track = None
+        self.current_index = next_index
+
+    def get_current_track(self) -> Optional[str]:
+        """Get the filepath of the currently playing track."""
+        if 0 <= self.current_index < len(self.playlist):
+            return self.playlist[self.current_index]
+        return None
+
+    def clear_playlist(self) -> None:
+        """Clear the current playlist."""
+        self.stop()
+        self.playlist.clear()
+        self.current_index = 0
+
+    def __del__(self):
+        """Clean up pygame mixer on deletion."""
+        pygame.mixer.quit()
